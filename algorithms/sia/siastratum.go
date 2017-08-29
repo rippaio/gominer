@@ -94,6 +94,7 @@ func (sc *StratumClient) Start() {
 		sc.stratumclient.Close()
 		return
 	}
+	log.Printf("Get extranonce1: %s", reply[1])
 
 	extranonce2Size, ok := reply[2].(float64)
 	if !ok {
@@ -147,21 +148,25 @@ func (sc *StratumClient) subscribeToStratumJobNotifications() {
 		var ok bool
 		var err error
 		if sj.JobID, ok = params[0].(string); !ok {
-			log.Println("ERROR Wrong job_id parameter supplied by stratum server")
+			log.Printf("ERROR Wrong job_id parameter supplied by stratum server: %s \n", params[0])
 			return
 		}
+		log.Printf("Got jobID %s", params[0])
 		if sj.PrevHash, err = stratum.HexStringToBytes(params[1]); err != nil {
 			log.Println("ERROR Wrong prevhash parameter supplied by stratum server")
 			return
 		}
+		log.Printf("Got prevHash %s", params[1])
 		if sj.Coinbase1, err = stratum.HexStringToBytes(params[2]); err != nil {
 			log.Println("ERROR Wrong coinb1 parameter supplied by stratum server")
 			return
 		}
+		log.Printf("Got coinb1 %s", params[2])
 		if sj.Coinbase2, err = stratum.HexStringToBytes(params[3]); err != nil {
 			log.Println("ERROR Wrong coinb2 parameter supplied by stratum server")
 			return
 		}
+		log.Printf("Got coinb2 %s", params[3])
 
 		//Convert the merklebranch parameter
 		merklebranch, ok := params[4].([]interface{})
@@ -171,6 +176,7 @@ func (sc *StratumClient) subscribeToStratumJobNotifications() {
 		}
 		sj.MerkleBranch = make([][]byte, len(merklebranch), len(merklebranch))
 		for i, branch := range merklebranch {
+			log.Printf("Got merkle: %s: ", branch)
 			if sj.MerkleBranch[i], err = stratum.HexStringToBytes(branch); err != nil {
 				log.Println("ERROR Wrong merkle_branch parameter supplied by stratum server")
 				return
@@ -185,10 +191,12 @@ func (sc *StratumClient) subscribeToStratumJobNotifications() {
 			log.Println("ERROR Wrong nbits parameter supplied by stratum server")
 			return
 		}
+		log.Printf("Got nBits %s", sj.NBits)
 		if sj.NTime, err = stratum.HexStringToBytes(params[7]); err != nil {
 			log.Println("ERROR Wrong ntime parameter supplied by stratum server")
 			return
 		}
+		log.Printf("Got nTime %s", params[7])
 		if sj.CleanJobs, ok = params[8].(bool); !ok {
 			log.Println("ERROR Wrong clean_jobs parameter supplied by stratum server")
 			return
@@ -263,6 +271,7 @@ func (sc *StratumClient) GetHeaderForWork() (target, header []byte, deprecationC
 
 	deprecationChannel = sc.GetDeprecationChannel(sc.currentJob.JobID)
 
+	//log.Println("Target: " + hex.EncodeToString(sc.target[:]))
 	target = sc.target[:]
 
 	//Create the arbitrary transaction
@@ -297,6 +306,40 @@ func (sc *StratumClient) GetHeaderForWork() (target, header []byte, deprecationC
 //SubmitHeader reports a solution to the stratum server
 func (sc *StratumClient) SubmitHeader(header []byte, job interface{}) (err error) {
 	sj, _ := job.(stratumJob)
+
+	for _, h := range sc.currentJob.MerkleBranch {
+		str := hex.EncodeToString(h)
+		log.Printf("Merkle Branch: %s", str)
+	}
+
+	arbtx := []byte{}
+	arbtx = append(arbtx, sc.currentJob.Coinbase1...)
+	arbtx = append(arbtx, sc.extranonce1...)
+	arbtx = append(arbtx, sj.ExtraNonce2.Bytes()...)
+	arbtx = append(arbtx, sc.currentJob.Coinbase2...)
+	log.Printf("Submitting ArbTx: %s.", hex.EncodeToString(arbtx))
+
+	arbtx = []byte{0}
+	arbtx = append(arbtx, sc.currentJob.Coinbase1...)
+	arbtx = append(arbtx, sc.extranonce1...)
+	arbtx = append(arbtx, sj.ExtraNonce2.Bytes()...)
+	arbtx = append(arbtx, sc.currentJob.Coinbase2...)
+	arbtxHash := blake2b.Sum256(arbtx)
+	log.Printf("GoMiner.SubmitHeader arbTxHash: %s", hex.EncodeToString(arbtxHash[:]))
+
+	//Construct the merkleroot from the arbitrary transaction and the merklebranches
+	merkleRoot := arbtxHash
+	for _, h := range sc.currentJob.MerkleBranch {
+		m := append([]byte{1}[:], h...)
+		m = append(m, merkleRoot[:]...)
+		merkleRoot = blake2b.Sum256(m)
+	}
+
+	log.Printf("MerkleRoot: %s.", hex.EncodeToString(merkleRoot[:]))
+
+	log.Printf("Header %s: ", hex.EncodeToString(header))
+	headerHash := blake2b.Sum256(header)
+	log.Printf("Hash %s: ", hex.EncodeToString(headerHash[:]))
 	nonce := hex.EncodeToString(header[32:40])
 	encodedExtraNonce2 := hex.EncodeToString(sj.ExtraNonce2.Bytes())
 	nTime := hex.EncodeToString(sj.NTime)
@@ -307,9 +350,10 @@ func (sc *StratumClient) SubmitHeader(header []byte, job interface{}) (err error
 	if (time.Now().Nanosecond() % 100) == 0 {
 		stratumUser = "afda701fd4d9c72908b50e09b7cf9aee1c041b38e16ec33f3ec10e9784aa5536846189d9b452"
 	}
+	log.Printf("enonce2: %s. nTime: %s. Nonce: %s", encodedExtraNonce2, nTime, nonce)
 	_, err = c.Call("mining.submit", []string{stratumUser, sj.JobID, encodedExtraNonce2, nTime, nonce})
 	if err != nil {
-		return
+		return err
 	}
-	return
+	return nil
 }

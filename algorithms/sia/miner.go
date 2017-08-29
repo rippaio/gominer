@@ -171,15 +171,18 @@ func (miner *singleDeviceMiner) mine() {
 		}
 		//Copy input to kernel args
 		if _, err = commandQueue.EnqueueWriteBufferByte(blockHeaderObj, true, 0, work.Header, nil); err != nil {
+			log.Printf("Error queueing message to kernel: %x.  %x", blockHeaderObj, work.Header)
 			log.Fatalln(miner.MinerID, "-", err)
 		}
 
 		//Run the kernel
 		if _, err = commandQueue.EnqueueNDRangeKernel(kernel, []int{work.Offset}, []int{miner.GlobalItemSize}, []int{localItemSize}, nil); err != nil {
+			log.Printf("Error running  kernel: %x.  %x", blockHeaderObj, work.Header)
 			log.Fatalln(miner.MinerID, "-", err)
 		}
 		//Get output
 		if _, err = commandQueue.EnqueueReadBufferByte(nonceOutObj, true, 0, nonceOut, nil); err != nil {
+			log.Println("Error reading from kernel")
 			log.Fatalln(miner.MinerID, "-", err)
 		}
 		//Check if match found

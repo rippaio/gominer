@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"log"
 	"net"
 	"sync"
 	"time"
@@ -132,6 +133,7 @@ func (c *Client) Listen() {
 			return
 		}
 		r := response{}
+		log.Println("Got message: " + rawmessage)
 		err = json.Unmarshal([]byte(rawmessage), &r)
 		if err != nil {
 			c.dispatchError(err)
